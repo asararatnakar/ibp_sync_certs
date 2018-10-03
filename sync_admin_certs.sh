@@ -1,25 +1,29 @@
 #!/bin/bash
 
 if [ ! -f creds/network.json ]; then
-	printf "\n ERROR : Make sure to include the (Network Credentials) network.json under cred dir\n\n"
+	printf "\n ERROR : Make sure to include the (Network Credentials) network.json under ${PWD}/creds dir\n\n"
 	exit 1 
 fi
+
 export PATH=$PATH:$PWD/bin/
 PROG="[helio-apis]"
-rm -rf bin cacert.pem
+export CONNECTION_PROF_DIR=creds/connectionprofiles
 
-function log() {
-	printf "${PROG}  ${1}\n" 
-	# | tee -a run.log
-}
+rm -rf bin cacert.pem creds/org* ${CONNECTION_PROF_DIR}
 
 ####################
 # Helper Functions #
 ####################
-get_pem() {
+
+function log() {
+	printf "${PROG}  ${1}\n" 
+}
+
+function get_pem() {
 	awk '{printf "%s\\n", $0}' creds/org"$1"admin/msp/signcerts/cert.pem
 }
 
+## Get the First Orgname from Network credentails
 ORG1_NAME=$(jq -r "[.[] | .key][0]" creds/network.json)
 if [ "$ORG1_NAME" =  "PeerOrg1" ]; then
 	IS_ENTERPRISE=true
@@ -35,26 +39,23 @@ NETWORK_ID=$(jq -r .\"${ORG1_NAME}\".network_id creds/network.json)
 
 ORG1_API_KEY=$(jq -r .\"${ORG1_NAME}\".key creds/network.json)
 ORG1_API_SECRET=$(jq -r .\"${ORG1_NAME}\".secret creds/network.json)
-
-
-## TODO: Do we need to Download the connection profiles ?
-echo "Downloading the Connection profile for org1"
-curl -s -X GET --header 'Content-Type: application/json' --header 'Accept: application/json' --basic --user ${ORG1_API_KEY}:${ORG1_API_SECRET} ${API_ENDPOINT}/api/v1/networks/${NETWORK_ID}/connection_profile | jq . >& creds/org1.json
-
-# ORG1_NAME=$(jq -r '.organizations | to_entries[] | .key' creds/org1.json)
-
-ORG1_PEER_NAME=$(jq -r .organizations.\"${ORG1_NAME}\".peers[0] creds/org1.json)
-ORG1_CA_NAME=$(jq -r .organizations.\"${ORG1_NAME}\".certificateAuthorities[0] creds/org1.json)
-ORG1_CA_URL=$(jq -r .certificateAuthorities.\"$ORG1_CA_NAME\".url creds/org1.json | cut -d '/' -f 3)
-ORG1_ENROLL_SECRET=$(jq -r .certificateAuthorities.\"$ORG1_CA_NAME\".registrar[0].enrollSecret creds/org1.json)
+set -x
+log "Downloading the Connection profile for org1"
+mkdir -p ${CONNECTION_PROF_DIR}
+curl -s -X GET --header 'Content-Type: application/json' --header 'Accept: application/json' --basic --user ${ORG1_API_KEY}:${ORG1_API_SECRET} ${API_ENDPOINT}/api/v1/networks/${NETWORK_ID}/connection_profile | jq . >& ${CONNECTION_PROF_DIR}/org1.json
+echo
+ORG1_PEER_NAME=$(jq -r .organizations.\"${ORG1_NAME}\".peers[0] ${CONNECTION_PROF_DIR}/org1.json)
+ORG1_CA_NAME=$(jq -r .organizations.\"${ORG1_NAME}\".certificateAuthorities[0] ${CONNECTION_PROF_DIR}/org1.json)
+ORG1_CA_URL=$(jq -r .certificateAuthorities.\"$ORG1_CA_NAME\".url ${CONNECTION_PROF_DIR}/org1.json | cut -d '/' -f 3)
+ORG1_ENROLL_SECRET=$(jq -r .certificateAuthorities.\"$ORG1_CA_NAME\".registrar[0].enrollSecret ${CONNECTION_PROF_DIR}/org1.json)
 
 ############################################################
 # STEP 1 - generate user certs and upload to remote fabric #
 ############################################################
 # save the cert
-jq -r .certificateAuthorities.\"${ORG1_CA_NAME}\".tlsCACerts.pem creds/org1.json > cacert.pem
+jq -r .certificateAuthorities.\"${ORG1_CA_NAME}\".tlsCACerts.pem ${CONNECTION_PROF_DIR}/org1.json > cacert.pem
 log "Enrolling admin user for ${ORG1_NAME}."
-
+echo
 export ARCH=$(echo "$(uname -s|tr '[:upper:]' '[:lower:]'|sed 's/mingw64_nt.*/windows/')-$(uname -m | sed 's/x86_64/amd64/g')" | awk '{print tolower($0)}')
 if [ ! -f bin/fabric-ca-client ]; then
 	curl https://nexus.hyperledger.org/content/repositories/releases/org/hyperledger/fabric-ca/hyperledger-fabric-ca/${ARCH}-${CA_VERSION}/hyperledger-fabric-ca-${ARCH}-${CA_VERSION}.tar.gz | tar xz
@@ -88,7 +89,7 @@ curl -s -X POST \
 	--basic --user ${ORG1_API_KEY}:${ORG1_API_SECRET} \
 	--data "${BODY1}" \
     ${API_ENDPOINT}/api/v1/networks/${NETWORK_ID}/certificates
-
+echo
 
 ##########################
 # STEP 2 - restart peers #
@@ -103,6 +104,7 @@ curl -s -X POST \
 	--data-binary '{}' \
 	${API_ENDPOINT}/api/v1/networks/${NETWORK_ID}/nodes/${PEER}/stop
 
+echo
 log "Waiting for ${PEER} to stop..."
 RESULT=""
 while [[ ${RESULT} != "exited" ]]; do
@@ -112,6 +114,7 @@ while [[ ${RESULT} != "exited" ]]; do
 		--basic --user ${ORG1_API_KEY}:${ORG1_API_SECRET} \
 		${API_ENDPOINT}/api/v1/networks/${NETWORK_ID}/nodes/status | jq -r '.["'${PEER}'"].status')
 done
+echo
 log "${RESULT}"
 
 log "Starting ${PEER}"
@@ -122,6 +125,7 @@ curl -s -X POST \
 	--data-binary '{}' \
 	${API_ENDPOINT}/api/v1/networks/${NETWORK_ID}/nodes/${PEER}/start
 
+echo
 log "Waiting for ${PEER} to start..."
 RESULT=""
 while [[ ${RESULT} != "running" ]]; do
@@ -131,6 +135,7 @@ while [[ ${RESULT} != "running" ]]; do
 		--basic --user ${ORG1_API_KEY}:${ORG1_API_SECRET} \
 		${API_ENDPOINT}/api/v1/networks/${NETWORK_ID}/nodes/status | jq -r '.["'${PEER}'"].status')
 done
+echo
 log "${RESULT}"
 
 printf "\n\n Update connection profiles to include the admin certs of ${ORG1_NAME}"
@@ -145,14 +150,14 @@ if [ "$IS_ENTERPRISE" != true ]; then
 	ORG2_NAME=$(jq -r "[.[] | .key][1]" creds/network.json)
 	ORG2_API_KEY=$(jq -r .\"${ORG2_NAME}\".key creds/network.json)
 	ORG2_API_SECRET=$(jq -r .\"${ORG2_NAME}\".secret creds/network.json)
-	echo "Downloading the Connection profile for org2"
-	curl -s -X GET --header 'Content-Type: application/json' --header 'Accept: application/json' --basic --user ${ORG2_API_KEY}:${ORG2_API_SECRET} ${API_ENDPOINT}/api/v1/networks/${NETWORK_ID}/connection_profile | jq . >& creds/org2.json
-	# ORG2_NAME=$(jq -r '.organizations | to_entries[] | .key' creds/org2.json)
-	ORG2_PEER_NAME=$(jq -r .organizations.\"${ORG2_NAME}\".peers[0] creds/org2.json)
+	log "Downloading the Connection profile for ${ORG2_NAME}"
+	curl -s -X GET --header 'Content-Type: application/json' --header 'Accept: application/json' --basic --user ${ORG2_API_KEY}:${ORG2_API_SECRET} ${API_ENDPOINT}/api/v1/networks/${NETWORK_ID}/connection_profile | jq . >& ${CONNECTION_PROF_DIR}/org2.json
 
-	ORG2_CA_NAME=$(jq -r .organizations.\"${ORG2_NAME}\".certificateAuthorities[0] creds/org2.json)
-	ORG2_CA_URL=$(jq -r .certificateAuthorities.\"$ORG2_CA_NAME\".url creds/org2.json | cut -d '/' -f 3)
-	ORG2_ENROLL_SECRET=$(jq -r .certificateAuthorities.\"$ORG2_CA_NAME\".registrar[0].enrollSecret creds/org2.json)
+	ORG2_PEER_NAME=$(jq -r .organizations.\"${ORG2_NAME}\".peers[0] ${CONNECTION_PROF_DIR}/org2.json)
+
+	ORG2_CA_NAME=$(jq -r .organizations.\"${ORG2_NAME}\".certificateAuthorities[0] ${CONNECTION_PROF_DIR}/org2.json)
+	ORG2_CA_URL=$(jq -r .certificateAuthorities.\"$ORG2_CA_NAME\".url ${CONNECTION_PROF_DIR}/org2.json | cut -d '/' -f 3)
+	ORG2_ENROLL_SECRET=$(jq -r .certificateAuthorities.\"$ORG2_CA_NAME\".registrar[0].enrollSecret ${CONNECTION_PROF_DIR}/org2.json)
 
 	# STEP 1.2 - ORG2
 	log "Enrolling admin user for org2."
@@ -190,7 +195,7 @@ EOF2
 		--basic --user ${ORG2_API_KEY}:${ORG2_API_SECRET} \
 		--data-binary '{}' \
 		${API_ENDPOINT}/api/v1/networks/${NETWORK_ID}/nodes/${PEER}/stop
-
+	echo
 	log "Waiting for ${PEER} to stop..."
 	RESULT=""
 	while [[ $RESULT != "exited" ]]; do
@@ -201,6 +206,7 @@ EOF2
 			${API_ENDPOINT}/api/v1/networks/${NETWORK_ID}/nodes/status | jq -r '.["'${PEER}'"].status')
 	done
 	log "${RESULT}"
+	echo
 
 	log "Starting ${PEER}"
 	curl -s -X POST \
@@ -209,7 +215,7 @@ EOF2
 		--basic --user ${ORG2_API_KEY}:${ORG2_API_SECRET} \
 		--data-binary '{}' \
 		${API_ENDPOINT}/api/v1/networks/${NETWORK_ID}/nodes/${PEER}/start
-
+	echo
 	log "Waiting for ${PEER} to start..."
 	RESULT=""
 	while [[ $RESULT != "running" ]]; do
@@ -219,6 +225,7 @@ EOF2
 			--basic --user ${ORG2_API_KEY}:${ORG2_API_SECRET} \
 			${API_ENDPOINT}/api/v1/networks/${NETWORK_ID}/nodes/status | jq -r '.["'${PEER}'"].status')
 	done
+	echo
 	log "${RESULT}"
 
 	printf "\n\n Update connection profiles to include the admin certs of ${ORG2_NAME}"
@@ -227,6 +234,7 @@ EOF2
 	export ORG=${ORG2_NAME}
 	export ORG_NUM=org2
 	node updateAdminCerts.js
+	echo
 fi
 
 #########################
@@ -240,6 +248,7 @@ curl -s -X POST \
   	--data-binary '{}' \
   	${API_ENDPOINT}/api/v1/networks/${NETWORK_ID}/channels/${CHANNEL_NAME}/sync
 
+echo
 
 printf "\n\n========= A D M I N   C E R T S   A R E   S Y N C E D  O N   C H A N N E L =============\n"
 

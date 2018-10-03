@@ -23,9 +23,9 @@ if (! key || key == undefined ){
 }
 
 
-let config = require(path.join(__dirname, 'creds',  orgName + '.json'));
+let config = require(path.join(__dirname, process.env.CONNECTION_PROF_DIR,  orgNumber + '.json'));
 config.organizations[orgName].signedCert.pem = cert.replace(/\\n/g, '\n');
 config.organizations[orgName].adminPrivateKey = {};
 config.organizations[orgName].adminPrivateKey.pem = key.replace(/\\n/g, '\n');
 // console.log(JSON.stringify(config, null, 4));
-fs.writeFileSync(path.join(__dirname, 'creds', orgNumber + '.json'), JSON.stringify(config, null, 4), 'utf-8');
+fs.writeFileSync(path.join(__dirname, process.env.CONNECTION_PROF_DIR, orgNumber + '.json'), JSON.stringify(config, null, 4), 'utf-8');

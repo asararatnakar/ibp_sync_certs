@@ -225,7 +225,7 @@ EOF2
 	export CERT=$(awk 'NF {sub(/\r/, ""); printf "%s\\n",$0;}' creds/org2admin/msp/signcerts/cert.pem) 
 	export KEY=$(awk 'NF {sub(/\r/, ""); printf "%s\\n",$0;}' creds/org2admin/msp/keystore/priv.pem)
 	export ORG=${ORG2_NAME}
-	export ORG_NUM=org1
+	export ORG_NUM=org2
 	node updateAdminCerts.js
 fi
 

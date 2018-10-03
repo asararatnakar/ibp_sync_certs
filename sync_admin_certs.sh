@@ -39,7 +39,7 @@ NETWORK_ID=$(jq -r .\"${ORG1_NAME}\".network_id creds/network.json)
 
 ORG1_API_KEY=$(jq -r .\"${ORG1_NAME}\".key creds/network.json)
 ORG1_API_SECRET=$(jq -r .\"${ORG1_NAME}\".secret creds/network.json)
-set -x
+
 log "Downloading the Connection profile for org1"
 mkdir -p ${CONNECTION_PROF_DIR}
 curl -s -X GET --header 'Content-Type: application/json' --header 'Accept: application/json' --basic --user ${ORG1_API_KEY}:${ORG1_API_SECRET} ${API_ENDPOINT}/api/v1/networks/${NETWORK_ID}/connection_profile | jq . >& ${CONNECTION_PROF_DIR}/org1.json
